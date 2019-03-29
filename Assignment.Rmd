@@ -1,0 +1,128 @@
+---
+title: "Prediction Assignment"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(gbm)
+library(elasticnet)
+library(mlbench)
+library(parallel)
+library(doParallel)
+```
+
+```{r}
+cluster <- makeCluster(detectCores()-1)
+registerDoParallel(cluster)
+
+fitControl <- trainControl(method="cv", number=5, allowParallel=TRUE)
+```
+
+
+#### Load the training and test data
+```{r}
+training_data_raw <- read.csv("pml-training.csv", na.strings = "NA")
+testing_data_raw <- read.csv("pml-testing.csv")
+```
+
+#### Cleaning the data
+
+
+
+Columns have either no missing values, or at least 98% missing values.
+Columns containing almost exclusively missing values are removed from the data set.
+
+
+Variables needed for prediction:
+
+readouts of sensors
+
+- 4 sensors at arm, forearm, dumbell and belt
+
+- each sensor has x-y-z, for gyros, accel and magnet
+
+- combined for roll, pitch, yaw and total accel
+
+- other vars to be removed
+
+- roll x,y,z of Arm, Forearm, Belt, Dumbell
+
+- gyros
+
+- accel
+
+- magnet
+
+```{r}
+test <- testing_data_raw[colSums(!is.na(testing_data_raw))>0]
+training <- training_data_raw[colSums(!is.na(testing_data_raw))>0]
+```
+
+59 variables remain to predict the movement class, after removing NA values from the test and training data set.
+
+
+Remove sample id, variables for recorded time and user name from training data. (columns 1-6)
+```{r}
+training <- training[-c(1:6)]
+```
+
+
+#### Exploratory Data Analysis
+
+Test data consists of 20 problem id's, which are a placeholder for the actual class of movement (A,B,C,D,E)
+
+
+```{r}
+unique(training$classe)
+```
+
+
+
+In order to cross validate our trained model, we need to split the training data set. 
+```{r}
+inTrain <- createDataPartition(y=training$classe, p=0.7, list=FALSE)
+
+training <- training[inTrain,]
+
+testing <- training[-inTrain,]
+
+```
+
+
+### Random Forest
+
+Fitting the model
+```{r cache=TRUE}
+set.seed(121)
+fit_rf <- train(classe~., method="rf", training, trControl = fitControl)
+```
+
+Prediction and test for accuracy
+```{r}
+pred_rf <- predict(fit_rf, testing)
+confusionMatrix(pred_rf, testing$classe)
+```
+
+Accuracy of .9981 for the model on the split data from the original training data set.
+
+Now we can predict the variables from the original test set and combine the results in for each ID in a new data frame.
+```{r}
+pred_final <- predict(fit_rf, test)
+
+#creating data frame for results
+
+results <- cbind(test$X, data.frame(pred_final))
+results
+```
+We achieved a result of 20/20 correct predictions for the test set.
+
+```{r}
+stopCluster(cluster)
+registerDoSEQ()
+```
